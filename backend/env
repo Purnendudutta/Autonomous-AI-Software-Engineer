@@ -1,0 +1,33 @@
+# Application
+APP_NAME="Autonomous AI Software Engineer"
+APP_VERSION="0.1.0"
+ENVIRONMENT=development
+DEBUG=true
+SECRET_KEY=dev-secret-key-change-in-production-12345678
+
+# API
+BACKEND_HOST=0.0.0.0
+BACKEND_PORT=8000
+CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+
+# Database (Default to localhost for local testing, overridden to postgres in docker-compose)
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5433
+POSTGRES_DB=ai_engineer
+POSTGRES_USER=ai_engineer
+POSTGRES_PASSWORD=changeme
+
+# LLM Provider Configuration (Google Gemini)
+LLM_PROVIDER=openai
+LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+LLM_MODEL=gemini-3.6-flash
+OPENAI_API_KEY=API_KEY_GOES_HERE
+
+# Embedding Configuration
+EMBEDDING_PROVIDER=openai
+EMBEDDING_MODEL=gemini-embedding-2
+EMBEDDING_DIMENSIONS=1536
+EMBEDDING_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+
+# Workspaces
+WORKSPACE_BASE_DIR=/tmp/ai-engineer-workspaces
