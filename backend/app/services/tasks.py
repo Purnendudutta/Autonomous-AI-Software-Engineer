@@ -100,6 +100,19 @@ async def execute_agent_task(task_id: str) -> None:
             ),
         )
 
+        primary_language = "Python"
+        if snapshot and snapshot.languages and isinstance(snapshot.languages, dict):
+            try:
+                sorted_langs = sorted(
+                    snapshot.languages.items(),
+                    key=lambda item: item[1].get("file_count", 0) if isinstance(item[1], dict) else 0,
+                    reverse=True,
+                )
+                if sorted_langs:
+                    primary_language = sorted_langs[0][0]
+            except Exception:
+                primary_language = "Python"
+
         initial_state: AgentState = {
             "task_id": task_id,
             "repository_id": task.repository_id,
@@ -107,7 +120,7 @@ async def execute_agent_task(task_id: str) -> None:
             "workspace_path": snapshot.workspace_path if snapshot else "",
             "task_description": task.description,
             "repository_summary": snapshot.summary if snapshot else "",
-            "primary_language": "Python",
+            "primary_language": primary_language,
             "retry_count": 0,
             "max_retries": 3,
             "messages": [],

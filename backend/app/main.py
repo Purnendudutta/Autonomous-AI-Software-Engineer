@@ -109,6 +109,16 @@ def create_app() -> FastAPI:
     app.include_router(rag.router)
     app.include_router(tasks.router)
 
+    @app.get("/", tags=["Root"])
+    async def root() -> dict[str, str]:
+        return {
+            "name": settings.app_name,
+            "version": settings.app_version,
+            "status": "online",
+            "docs": "/docs",
+            "health": "/health",
+        }
+
     # ── Exception Handlers ────────────────────────────────────────────────────
     @app.exception_handler(ValueError)
     async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:

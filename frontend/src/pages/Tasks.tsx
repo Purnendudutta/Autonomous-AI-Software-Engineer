@@ -10,6 +10,7 @@ import {
   Search,
   Sparkles,
   ArrowRight,
+  Trash2,
 } from 'lucide-react'
 import { repositoryApi, taskApi } from '@/services/api'
 import type { Repository, Task, TaskStatus } from '@/types'
@@ -82,6 +83,28 @@ export function Tasks() {
       setSubmitError(err instanceof Error ? err.message : 'Failed to create task')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleDeleteTask = async (taskId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    if (!confirm('Are you sure you want to delete this task?')) return
+    try {
+      await taskApi.delete(taskId)
+      setTasks((prev) => prev.filter((t) => t.id !== taskId))
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete task')
+    }
+  }
+
+  const handleClearFailed = async () => {
+    if (!confirm('Are you sure you want to clear all failed tasks?')) return
+    try {
+      await taskApi.clearFailed()
+      setTasks((prev) => prev.filter((t) => t.status !== 'failed'))
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to clear failed tasks')
     }
   }
 
@@ -215,20 +238,31 @@ export function Tasks() {
         </div>
 
         {/* Status Filter Tabs */}
-        <div className="flex gap-1.5 border-b border-[#30363d] pb-2 text-xs">
-          {(['all', 'running', 'succeeded', 'failed'] as const).map((filter) => (
+        <div className="flex items-center justify-between border-b border-[#30363d] pb-2 text-xs">
+          <div className="flex gap-1.5">
+            {(['all', 'running', 'succeeded', 'failed'] as const).map((filter) => (
+              <button
+                key={filter}
+                onClick={() => setStatusFilter(filter)}
+                className={`px-3 py-1 rounded capitalize font-medium transition-colors ${
+                  statusFilter === filter
+                    ? 'bg-[#21262d] text-white border border-[#30363d]'
+                    : 'text-[#8b949e] hover:text-white'
+                }`}
+              >
+                {filter}
+              </button>
+            ))}
+          </div>
+
+          {tasks.some((t) => t.status === 'failed') && (
             <button
-              key={filter}
-              onClick={() => setStatusFilter(filter)}
-              className={`px-3 py-1 rounded capitalize font-medium transition-colors ${
-                statusFilter === filter
-                  ? 'bg-[#21262d] text-white border border-[#30363d]'
-                  : 'text-[#8b949e] hover:text-white'
-              }`}
+              onClick={handleClearFailed}
+              className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1.5 hover:underline font-medium px-2 py-1 rounded hover:bg-red-950/20"
             >
-              {filter}
+              <Trash2 className="w-3.5 h-3.5" /> Clear Failed Tasks
             </button>
-          ))}
+          )}
         </div>
 
         {/* Task Cards */}
@@ -277,13 +311,20 @@ export function Tasks() {
                   </div>
                 </div>
 
-                <div>
+                <div className="flex items-center gap-2">
                   <Link
                     to={`/tasks/${task.id}`}
                     className="btn btn-secondary text-xs flex items-center gap-1.5 py-1.5 px-3 whitespace-nowrap"
                   >
                     Open Workspace <ArrowRight className="w-3 h-3" />
                   </Link>
+                  <button
+                    onClick={(e) => handleDeleteTask(task.id, e)}
+                    title="Delete task"
+                    className="p-1.5 text-[#8b949e] hover:text-red-400 hover:bg-red-950/30 rounded border border-[#30363d] hover:border-red-800 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             ))}

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -121,32 +122,28 @@ async def execute_sandbox_tests(
     # Add workspace to PYTHONPATH
     env["PYTHONPATH"] = str(root) + os.pathsep + env.get("PYTHONPATH", "")
 
-    try:
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(root),
-            env=env,
-        )
-
+    def _run_cmd() -> tuple[str, str, int, bool]:
         try:
-            raw_stdout, raw_stderr = await asyncio.wait_for(
-                proc.communicate(),
+            completed = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                cwd=str(root),
+                env=env,
                 timeout=timeout_seconds,
             )
-            stdout = raw_stdout.decode("utf-8", errors="replace")
-            stderr = raw_stderr.decode("utf-8", errors="replace")
-            exit_code = proc.returncode if proc.returncode is not None else 1
-        except asyncio.TimeoutError:
-            timed_out = True
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-            stderr = f"Test execution timed out after {timeout_seconds} seconds."
-            exit_code = 124
+            out = completed.stdout.decode("utf-8", errors="replace") if isinstance(completed.stdout, bytes) else str(completed.stdout)
+            err = completed.stderr.decode("utf-8", errors="replace") if isinstance(completed.stderr, bytes) else str(completed.stderr)
+            return out, err, completed.returncode, False
+        except subprocess.TimeoutExpired as exc:
+            out = (exc.stdout or b"").decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else str(exc.stdout or "")
+            err = f"Test execution timed out after {timeout_seconds} seconds."
+            return out, err, 124, True
+        except Exception as exc:
+            return "", f"Failed to launch sandbox execution: {exc}", 1, False
 
+    try:
+        stdout, stderr, exit_code, timed_out = await asyncio.to_thread(_run_cmd)
     except Exception as exc:
         logger.error("sandbox_execution_exception", error=str(exc))
         stderr = f"Failed to launch sandbox execution: {exc}"

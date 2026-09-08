@@ -290,8 +290,8 @@ async def get_repository_tree(repository_id: str, session: SessionDep) -> FileTr
 )
 async def get_repository_file(
     repository_id: str,
+    session: SessionDep,
     path: str = Query(..., description="Relative file path inside the repository"),
-    session: SessionDep = None,
 ) -> FileContentResponse:
     """
     Read file content from the repository workspace safely with path traversal protection.

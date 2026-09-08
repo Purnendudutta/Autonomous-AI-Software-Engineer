@@ -29,8 +29,9 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      # Override host to use Docker service name
+      # Override host and port to use internal Docker network
       POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
       WORKSPACE_BASE_DIR: /tmp/ai-engineer-workspaces
     volumes:
       # Mount source for hot-reload in development

@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -15,7 +16,7 @@ from app.api.dependencies import SessionDep
 from app.core.logging import get_logger
 from app.database.repositories import AgentRunRepo, RepositoryRepo, TaskRepo
 from app.schemas.agent import AgentLogEvent, AgentStepResponse, CodeChangeResponse, DiffResponse
-from app.schemas.report import CodeReviewResponse, ReportResponse, TestRunResponse
+from app.schemas.report import CodeReviewResponse, ReportResponse, ReviewFindingResponse, TestRunResponse
 from app.schemas.task import (
     TaskCancelResponse,
     TaskCreateRequest,
@@ -277,6 +278,37 @@ async def cancel_task(task_id: str, session: SessionDep) -> TaskCancelResponse:
         status="cancelled",
         message="Task cancellation requested.",
     )
+
+
+# ─── Delete ──────────────────────────────────────────────────────────────────
+
+@router.delete(
+    "/failed/clear",
+    summary="Clear all failed tasks",
+)
+async def clear_failed_tasks(session: SessionDep):
+    """Delete all tasks with status 'failed'."""
+    from sqlalchemy import delete
+    from app.database.models import Task
+    result = await session.execute(
+        delete(Task).where(Task.status == "failed")
+    )
+    await session.commit()
+    logger.info("failed_tasks_cleared", count=result.rowcount)
+    return {"deleted_count": result.rowcount, "message": f"Cleared {result.rowcount} failed task(s)."}
+
+
+@router.delete(
+    "/{task_id}",
+    summary="Delete a single task",
+)
+async def delete_task(task_id: str, session: SessionDep):
+    """Delete a task and cascade to its runs, steps, tests, and reports."""
+    task = await _get_task_or_404(task_id, session)
+    await session.delete(task)
+    await session.commit()
+    logger.info("task_deleted", task_id=task_id)
+    return {"task_id": task_id, "deleted": True, "message": f"Task '{task_id}' deleted."}
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────

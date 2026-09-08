@@ -152,6 +152,16 @@ export const taskApi = {
     return data
   },
 
+  delete: async (taskId: string): Promise<{ task_id: string; deleted: boolean }> => {
+    const { data } = await apiClient.delete(`/api/tasks/${taskId}`)
+    return data
+  },
+
+  clearFailed: async (): Promise<{ deleted_count: number; message: string }> => {
+    const { data } = await apiClient.delete('/api/tasks/failed/clear')
+    return data
+  },
+
   getLogsUrl: (taskId: string): string => `${BASE_URL}/api/tasks/${taskId}/logs`,
 }
 
