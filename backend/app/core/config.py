@@ -10,6 +10,7 @@ from __future__ import annotations
 from functools import lru_cache
 import json
 from typing import Any, Literal
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from pydantic import AnyUrl, Field, PostgresDsn, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -77,7 +78,41 @@ class Settings(BaseSettings):
             url = self.database_url
             if url.startswith("postgresql://"):
                 url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-            return url
+
+            # Sanitize query parameters for asyncpg compatibility.
+            # Cloud providers (e.g. Neon) may append libpq params like 'channel_binding=prefer'
+            # or 'sslmode=require' which asyncpg.connect() rejects with a TypeError.
+            parsed = urlparse(url)
+            allowed_keys = {
+                "ssl",
+                "timeout",
+                "command_timeout",
+                "statement_cache_size",
+                "max_cached_statement_lifetime",
+                "max_cacheable_statement_size",
+                "direct_tls",
+                "server_settings",
+            }
+            cleaned_query: list[tuple[str, str]] = []
+            has_ssl = False
+
+            if parsed.query:
+                for k, v in parse_qsl(parsed.query):
+                    if k == "sslmode":
+                        cleaned_query.append(("ssl", v))
+                        has_ssl = True
+                    elif k == "ssl":
+                        cleaned_query.append(("ssl", v))
+                        has_ssl = True
+                    elif k in allowed_keys:
+                        cleaned_query.append((k, v))
+                    # Ignore unsupported params like channel_binding
+
+            # Ensure SSL is enabled for Neon/Render hosted DBs if omitted
+            if not has_ssl and ("neon.tech" in (parsed.netloc or "") or "render" in (parsed.netloc or "")):
+                cleaned_query.append(("ssl", "require"))
+
+            return urlunparse(parsed._replace(query=urlencode(cleaned_query)))
         return (
             f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
