@@ -60,16 +60,36 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    Promise.all([
-      healthApi.check().catch(() => null),
-      repositoryApi.list().catch(() => []),
-      taskApi.list().catch(() => []),
-    ]).then(([h, r, t]) => {
-      setHealth(h)
-      setRepos(r)
-      setTasks(t)
-      setLoading(false)
-    })
+    let mounted = true
+
+    const loadData = async () => {
+      const [h, r, t] = await Promise.all([
+        healthApi.check().catch(() => null),
+        repositoryApi.list().catch(() => []),
+        taskApi.list().catch(() => []),
+      ])
+      if (mounted) {
+        setHealth(h)
+        setRepos(r)
+        setTasks(t)
+        setLoading(false)
+      }
+    }
+
+    loadData()
+
+    // Periodically re-check health so cold starts on Render recover automatically
+    const interval = setInterval(async () => {
+      const h = await healthApi.check().catch(() => null)
+      if (mounted && h?.status === 'ok') {
+        setHealth(h)
+      }
+    }, 8000)
+
+    return () => {
+      mounted = false
+      clearInterval(interval)
+    }
   }, [])
 
   const activeTasks = tasks.filter((t) => t.status === 'running' || t.status === 'pending').length

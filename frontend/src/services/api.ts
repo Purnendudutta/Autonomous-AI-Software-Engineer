@@ -51,8 +51,13 @@ apiClient.interceptors.response.use(
 
 export const healthApi = {
   check: async (): Promise<HealthResponse> => {
-    const { data } = await apiClient.get<HealthResponse>('/health')
-    return data
+    try {
+      const { data } = await apiClient.get<HealthResponse>('/health')
+      return data
+    } catch {
+      const { data } = await apiClient.get<HealthResponse>('/api/health')
+      return data
+    }
   },
 }
 
