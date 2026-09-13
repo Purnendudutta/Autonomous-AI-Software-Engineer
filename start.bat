@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 title Autonomous AI Software Engineer Launcher
 echo ===================================================
 echo   Autonomous AI Software Engineer Launcher
@@ -6,9 +6,9 @@ echo ===================================================
 echo.
 
 :: 1. Start Docker container for database
-echo [1/3] Starting Database container (aie_postgres)...
-docker start aie_postgres >nul 2>&1
-timeout /t 2 /nobreak >nul
+echo [1/3] Starting Database container (PostgreSQL + pgvector)...
+docker compose up -d postgres
+timeout /t 3 /nobreak >nul
 
 :: 2. Launch Backend in a new window
 echo [2/3] Launching Backend Server on port 8000...
