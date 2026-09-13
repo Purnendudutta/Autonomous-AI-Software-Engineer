@@ -4,6 +4,13 @@ Write-Host "=================================================" -ForegroundColor 
 Write-Host " Starting Autonomous AI Software Engineer Engine " -ForegroundColor Cyan
 Write-Host "=================================================" -ForegroundColor Cyan
 
+# 0. Ensure .env file exists
+if (-not (Test-Path "$PSScriptRoot\.env")) {
+    Write-Host "[.env missing] Auto-creating .env from .env.example..." -ForegroundColor Cyan
+    Copy-Item "$PSScriptRoot\.env.example" "$PSScriptRoot\.env"
+    Write-Host "[.env generated with local defaults]" -ForegroundColor Green
+}
+
 # 1. Start PostgreSQL + pgvector Docker container
 Write-Host "[1/3] Starting PostgreSQL + pgvector container..." -ForegroundColor Yellow
 docker compose up -d postgres

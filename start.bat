@@ -5,6 +5,14 @@ echo   Autonomous AI Software Engineer Launcher
 echo ===================================================
 echo.
 
+:: 0. Ensure .env exists
+if not exist "%~dp0.env" (
+    echo [.env missing] Auto-creating .env from .env.example...
+    copy "%~dp0.env.example" "%~dp0.env" >nul
+    echo [.env generated successfully with local development defaults]
+    echo.
+)
+
 :: 1. Start Docker container for database
 echo [1/3] Starting Database container (PostgreSQL + pgvector)...
 docker compose up -d postgres
