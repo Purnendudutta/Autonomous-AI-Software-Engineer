@@ -84,6 +84,7 @@ async def execute_agent_task(task_id: str) -> None:
         await session.commit()
 
         snapshot = await repo_db.get_latest_snapshot(task.repository_id)
+        repo_obj = await repo_db.get_by_id(task.repository_id)
 
         # Broadcast task started event
         seq = 1
@@ -99,6 +100,44 @@ async def execute_agent_task(task_id: str) -> None:
                 timestamp=datetime.now(timezone.utc).isoformat(),
             ),
         )
+
+        workspace_path = snapshot.workspace_path if snapshot else ""
+
+        # Ensure repository workspace is present on disk before running agents.
+        # On cloud container hosts (like Render), /tmp is ephemeral and wiped on restart.
+        from pathlib import Path
+        from app.repository.clone import WorkspaceManager, clone_repository
+
+        if repo_obj and (not workspace_path or not Path(workspace_path).exists()):
+            logger.info("workspace_missing_re_cloning", repo=repo_obj.url, task_id=task_id)
+            seq += 1
+            broadcast_event(
+                task_id,
+                AgentLogEvent(
+                    event_type="workspace_restoring",
+                    task_id=task_id,
+                    sequence=seq,
+                    node_name="orchestrator",
+                    message="Restoring repository workspace on disk...",
+                    status="running",
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            ws_mgr = WorkspaceManager()
+            workspace = ws_mgr.create_workspace(task.repository_id)
+            try:
+                clone_res = await clone_repository(
+                    url=repo_obj.url,
+                    dest_dir=workspace,
+                    branch=task.branch or repo_obj.default_branch,
+                )
+                workspace_path = str(clone_res.repo_path)
+                if snapshot:
+                    await repo_db.update_snapshot_workspace(snapshot.id, workspace_path)
+                    await session.commit()
+                logger.info("workspace_restored_successfully", path=workspace_path)
+            except Exception as clone_err:
+                logger.error("workspace_auto_clone_failed", error=str(clone_err))
 
         primary_language = "Python"
         if snapshot and snapshot.languages and isinstance(snapshot.languages, dict):
@@ -117,7 +156,7 @@ async def execute_agent_task(task_id: str) -> None:
             "task_id": task_id,
             "repository_id": task.repository_id,
             "snapshot_id": snapshot.id if snapshot else "",
-            "workspace_path": snapshot.workspace_path if snapshot else "",
+            "workspace_path": workspace_path,
             "task_description": task.description,
             "repository_summary": snapshot.summary if snapshot else "",
             "primary_language": primary_language,

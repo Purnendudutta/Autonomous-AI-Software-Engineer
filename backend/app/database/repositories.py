@@ -95,6 +95,14 @@ class RepositoryRepo:
         )
         return result.scalar_one_or_none()
 
+    async def update_snapshot_workspace(self, snapshot_id: str, workspace_path: str) -> None:
+        """Update workspace_path on snapshot when re-cloned."""
+        await self.session.execute(
+            update(RepositorySnapshot)
+            .where(RepositorySnapshot.id == snapshot_id)
+            .values(workspace_path=workspace_path)
+        )
+
 
 class TaskRepo:
     """CRUD for Task model."""

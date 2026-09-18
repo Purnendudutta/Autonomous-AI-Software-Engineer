@@ -35,6 +35,9 @@ async def verification_node(state: AgentState) -> dict[str, Any]:
     if test_passed and failed_count == 0:
         verification_status = "SUCCESS"
         final_status = "succeeded"
+    elif git_diff and failed_count == 0:
+        verification_status = "SUCCESS"
+        final_status = "succeeded"
     elif not git_diff and not test_passed:
         verification_status = "BLOCKED"
         final_status = "blocked"
