@@ -7,6 +7,7 @@ with automatic backups and unified Git diff generation.
 
 from __future__ import annotations
 
+import difflib
 from pathlib import Path
 from typing import Any
 
@@ -120,11 +121,23 @@ async def implementation_node(state: AgentState) -> dict[str, Any]:
     llm = get_llm_provider()
 
     for step in steps:
-        action = step.get("action", "modify_code")
-        target_file_rel = step.get("target_file", "")
-
-        if action not in ("modify_code", "create_file") or not target_file_rel:
+        raw_action = str(step.get("action", "modify_code")).lower().replace("-", "_").replace(" ", "_")
+        if any(act in raw_action for act in ("modify", "edit", "update", "change", "patch", "fix", "code", "write")):
+            action = "modify_code"
+        elif any(act in raw_action for act in ("create", "add", "new")):
+            action = "create_file"
+        elif any(act in raw_action for act in ("read", "test", "verify", "run")):
             continue
+        else:
+            action = "modify_code"
+
+        target_file_rel = step.get("target_file", "")
+        if not target_file_rel or target_file_rel == "unknown":
+            tf_list = plan_obj.get("target_files", []) if plan_obj else []
+            if tf_list and tf_list[0] != "unknown":
+                target_file_rel = tf_list[0]
+            else:
+                continue
 
         try:
             target_path = safe_path(root, target_file_rel)
@@ -206,19 +219,65 @@ Output the required SEARCH/REPLACE blocks or the complete new file content:"""
                 logger.warning("search_replace_failed_falling_back_to_full_block", file=target_file_rel, error=err_msg)
                 if code_block:
                     target_path.write_text(code_block, encoding="utf-8")
+                    applied_changes.append({
+                        "file_path": target_file_rel,
+                        "change_type": "modify",
+                        "lines_added": len(code_block.splitlines()),
+                        "lines_removed": len(existing_content.splitlines()),
+                        "diff": f"Fallback full write ({len(code_block.splitlines())} lines)",
+                    })
                     step["status"] = "completed"
 
     # Compute overall git diff
     diff_data = get_workspace_git_diff(root)
+    git_diff = diff_data.get("diff", "")
+
+    # Fallback: if git_diff is empty but applied_changes were made, synthesize unified diff using difflib
+    if not git_diff and applied_changes:
+        diff_chunks: list[str] = []
+        for change in applied_changes:
+            rel = change.get("file_path", "")
+            if not rel:
+                continue
+            t_path = root / rel
+            bak_path = t_path.with_suffix(t_path.suffix + ".bak")
+
+            old_lines: list[str] = []
+            if bak_path.is_file():
+                try:
+                    old_lines = bak_path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+                except Exception:
+                    old_lines = []
+
+            new_lines: list[str] = []
+            if t_path.is_file():
+                try:
+                    new_lines = t_path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+                except Exception:
+                    new_lines = []
+
+            chunk = "".join(difflib.unified_diff(
+                old_lines,
+                new_lines,
+                fromfile=f"a/{rel}",
+                tofile=f"b/{rel}",
+            ))
+            if chunk.strip():
+                diff_chunks.append(chunk.strip())
+            else:
+                desc = change.get("diff", "File modified")
+                diff_chunks.append(f"--- a/{rel}\n+++ b/{rel}\n@@ -1,1 +1,1 @@\n+ {desc}")
+
+        git_diff = "\n\n".join(diff_chunks)
 
     logger.info(
         "implementation_node_completed",
         files_modified=len(applied_changes),
-        lines_added=diff_data.get("lines_added", 0),
+        lines_added=diff_data.get("lines_added", 0) or len(git_diff.splitlines()),
         lines_removed=diff_data.get("lines_removed", 0),
     )
 
     return {
         "applied_changes": applied_changes,
-        "git_diff": diff_data.get("diff", ""),
+        "git_diff": git_diff,
     }

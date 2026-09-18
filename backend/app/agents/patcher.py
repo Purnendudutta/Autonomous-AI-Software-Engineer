@@ -105,10 +105,17 @@ def get_workspace_git_diff(workspace_path: Path | str) -> dict[str, Any]:
     except InvalidGitRepositoryError:
         return {"diff": "", "lines_added": 0, "lines_removed": 0, "files_changed": []}
 
+    diff_text = ""
     try:
         diff_text = repo.git.diff("HEAD")
+    except Exception:
+        try:
+            diff_text = repo.git.diff()
+        except Exception:
+            diff_text = ""
 
-        # Also capture untracked newly created files
+    untracked: list[str] = []
+    try:
         untracked = repo.untracked_files
         for uf in untracked:
             if uf.endswith(".bak"):
@@ -121,15 +128,14 @@ def get_workspace_git_diff(workspace_path: Path | str) -> dict[str, Any]:
                     diff_text += "\n".join("+" + l for l in content.splitlines()) + "\n"
                 except Exception:
                     pass
-
-        lines_added, lines_removed, files_changed = calculate_diff_stats(diff_text)
-
-        return {
-            "diff": diff_text.strip(),
-            "lines_added": lines_added,
-            "lines_removed": lines_removed,
-            "files_changed": files_changed or [u for u in untracked if not u.endswith(".bak")],
-        }
     except Exception as exc:
-        logger.warning("git_diff_failed", error=str(exc))
-        return {"diff": "", "lines_added": 0, "lines_removed": 0, "files_changed": []}
+        logger.warning("git_untracked_scan_failed", error=str(exc))
+
+    lines_added, lines_removed, files_changed = calculate_diff_stats(diff_text)
+
+    return {
+        "diff": diff_text.strip(),
+        "lines_added": lines_added,
+        "lines_removed": lines_removed,
+        "files_changed": files_changed or [u for u in untracked if not u.endswith(".bak")],
+    }

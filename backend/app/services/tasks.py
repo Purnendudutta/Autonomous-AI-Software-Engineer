@@ -128,7 +128,7 @@ async def execute_agent_task(task_id: str) -> None:
             try:
                 clone_res = await clone_repository(
                     url=repo_obj.url,
-                    dest_dir=workspace,
+                    workspace=workspace,
                     branch=task.branch or repo_obj.default_branch,
                 )
                 workspace_path = str(clone_res.repo_path)
