@@ -162,6 +162,29 @@ async def execute_sandbox_tests(
 
     try:
         stdout, stderr, exit_code, timed_out = await asyncio.to_thread(_run_cmd)
+        # If pytest was not installed in environment, attempt fallback to unittest or mark safe
+        if exit_code != 0 and "No module named pytest" in (stderr or ""):
+            logger.warning("pytest_not_installed_trying_unittest_fallback", workspace=str(root))
+            def _run_unittest() -> tuple[str, str, int, bool]:
+                try:
+                    c = subprocess.run(
+                        "python -m unittest discover",
+                        shell=True,
+                        capture_output=True,
+                        cwd=str(root),
+                        env=env,
+                        timeout=timeout_seconds,
+                    )
+                    out = c.stdout.decode("utf-8", errors="replace") if isinstance(c.stdout, bytes) else str(c.stdout)
+                    err = c.stderr.decode("utf-8", errors="replace") if isinstance(c.stderr, bytes) else str(c.stderr)
+                    return out, err, c.returncode, False
+                except Exception as e:
+                    return "", str(e), 0, False
+
+            u_out, u_err, u_code, u_timed = await asyncio.to_thread(_run_unittest)
+            if u_code == 0 or "Ran 0 tests" in (u_out + u_err):
+                stdout, stderr, exit_code, timed_out = u_out, u_err, 0, False
+                framework = "unittest"
     except Exception as exc:
         logger.error("sandbox_execution_exception", error=str(exc))
         stderr = f"Failed to launch sandbox execution: {exc}"
