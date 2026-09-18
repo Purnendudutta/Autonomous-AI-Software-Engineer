@@ -11,9 +11,11 @@ API key is read from settings — never hard-coded.
 
 from __future__ import annotations
 
+import asyncio
+import re
 from typing import Any
 
-from openai import AsyncOpenAI, AuthenticationError, OpenAIError
+from openai import AsyncOpenAI, AuthenticationError, OpenAIError, RateLimitError
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -32,7 +34,11 @@ class OpenAIProvider(LLMProvider):
 
     def __init__(self) -> None:
         settings = get_settings()
-        self._model = settings.llm_model
+        model = settings.llm_model
+        if "googleapis.com" in (settings.llm_base_url or ""):
+            if model in ("gemini-3.6-flash", "gemini-1.5-flash", "gemini-2.5-flash", "gpt-4o"):
+                model = "gemini-flash-latest"
+        self._model = model
         self._temperature = settings.llm_temperature
         self._max_tokens = settings.llm_max_tokens
 
@@ -76,24 +82,40 @@ class OpenAIProvider(LLMProvider):
         if response_format:
             kwargs["response_format"] = response_format
 
-        try:
-            response = await self._client.chat.completions.create(**kwargs)
-            choice = response.choices[0]
-            usage = response.usage
+        max_attempts = 4
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await self._client.chat.completions.create(**kwargs)
+                choice = response.choices[0]
+                usage = response.usage
 
-            return LLMResponse(
-                content=choice.message.content or "",
-                model=response.model,
-                prompt_tokens=usage.prompt_tokens if usage else 0,
-                completion_tokens=usage.completion_tokens if usage else 0,
-                finish_reason=choice.finish_reason or "stop",
-            )
-        except AuthenticationError as exc:
-            logger.error("llm_auth_error", error=str(exc))
-            raise RuntimeError("LLM authentication failed. Check OPENAI_API_KEY.") from exc
-        except OpenAIError as exc:
-            logger.error("llm_api_error", error=str(exc))
-            raise RuntimeError(f"LLM API error: {exc}") from exc
+                return LLMResponse(
+                    content=choice.message.content or "",
+                    model=response.model,
+                    prompt_tokens=usage.prompt_tokens if usage else 0,
+                    completion_tokens=usage.completion_tokens if usage else 0,
+                    finish_reason=choice.finish_reason or "stop",
+                )
+            except RateLimitError as exc:
+                if attempt < max_attempts:
+                    delay_match = re.search(r"retry in ([\d\.]+)s", str(exc), re.IGNORECASE)
+                    wait_s = float(delay_match.group(1)) + 1.0 if delay_match else (attempt * 4.0)
+                    logger.warning(
+                        "llm_rate_limit_encountered_backing_off",
+                        attempt=attempt,
+                        wait_seconds=round(wait_s, 2),
+                        error=str(exc),
+                    )
+                    await asyncio.sleep(wait_s)
+                    continue
+                logger.error("llm_rate_limit_exhausted", error=str(exc))
+                raise RuntimeError(f"LLM rate limit / quota exhausted after {max_attempts} attempts: {exc}") from exc
+            except AuthenticationError as exc:
+                logger.error("llm_auth_error", error=str(exc))
+                raise RuntimeError("LLM authentication failed. Check OPENAI_API_KEY.") from exc
+            except OpenAIError as exc:
+                logger.error("llm_api_error", error=str(exc))
+                raise RuntimeError(f"LLM API error: {exc}") from exc
 
     async def health_check(self) -> bool:
         """Attempt a minimal API call to verify connectivity."""
