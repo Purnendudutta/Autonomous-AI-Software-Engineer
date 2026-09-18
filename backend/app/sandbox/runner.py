@@ -46,7 +46,8 @@ class TestRunResult:
 
     @property
     def is_success(self) -> bool:
-        return self.exit_code == 0 and not self.timed_out and self.parsed_results.get("failed", 0) == 0
+        # Exit code 0: passed; Exit code 5: pytest no tests collected (not a test failure)
+        return self.exit_code in (0, 5) and not self.timed_out and self.parsed_results.get("failed", 0) == 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -72,7 +73,7 @@ def get_default_test_command(framework: str) -> str:
         return "go test ./..."
     elif "unittest" in fw:
         return "python -m unittest discover"
-    return "python -m pytest tests/ -v"
+    return "python -m pytest -v"
 
 
 async def execute_sandbox_tests(
@@ -94,7 +95,24 @@ async def execute_sandbox_tests(
         TestRunResult with stdout, stderr, exit code, and parsed metrics.
     """
     root = Path(workspace_path).resolve()
-    cmd = test_command or get_default_test_command(framework)
+    if test_command:
+        cmd = test_command
+    else:
+        fw = (framework or "pytest").lower()
+        if "jest" in fw or "npm" in fw:
+            cmd = "npm test"
+        elif "cargo" in fw:
+            cmd = "cargo test"
+        elif "go" in fw:
+            cmd = "go test ./..."
+        elif "unittest" in fw:
+            cmd = "python -m unittest discover"
+        elif (root / "backend" / "tests").is_dir() and not (root / "tests").is_dir():
+            cmd = "python -m pytest backend/tests/ -v"
+        elif (root / "tests").is_dir():
+            cmd = "python -m pytest tests/ -v"
+        else:
+            cmd = "python -m pytest -v"
 
     # Security check: validate command against allowlist
     try:

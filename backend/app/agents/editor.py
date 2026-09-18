@@ -181,6 +181,9 @@ Output the required SEARCH/REPLACE blocks or the complete new file content:"""
             response_text = response.content
         except Exception as exc:
             logger.error("llm_edit_call_failed", step=step.get("step_number"), error=str(exc))
+            err_msg = str(exc)
+            if any(keyword in err_msg.lower() for keyword in ("auth", "401", "key", "quota", "credit", "429", "model", "404")):
+                raise RuntimeError(f"LLM code edit failed: {err_msg}") from exc
             continue
 
         # 1. If it's a new file or full rewrite code block

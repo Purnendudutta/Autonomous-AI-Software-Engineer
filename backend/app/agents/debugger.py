@@ -98,6 +98,9 @@ Diagnose the root cause and generate revised corrective modification steps."""
         data = extract_json_from_response(response.content)
     except Exception as exc:
         logger.error("failure_analysis_llm_failed", error=str(exc))
+        err_msg = str(exc)
+        if any(keyword in err_msg.lower() for keyword in ("auth", "401", "key", "quota", "credit", "429", "model", "404")):
+            raise RuntimeError(f"LLM failure analysis failed: {err_msg}") from exc
         data = {}
 
     diagnosed_root_cause = data.get("diagnosed_root_cause") or f"Failure categorized as {category} from test output."

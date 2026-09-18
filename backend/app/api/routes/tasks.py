@@ -185,11 +185,15 @@ async def get_task_diff(task_id: str, session: SessionDep) -> DiffResponse:
 async def get_task_tests(task_id: str, session: SessionDep) -> list[TestRunResponse]:
     """Return all test run records, ordered by attempt number."""
     from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
     from app.database.models import TestRun
     await _get_task_or_404(task_id, session)
 
     result = await session.execute(
-        select(TestRun).where(TestRun.task_id == task_id).order_by(TestRun.attempt_number.asc())
+        select(TestRun)
+        .options(selectinload(TestRun.results))
+        .where(TestRun.task_id == task_id)
+        .order_by(TestRun.attempt_number.asc())
     )
     test_runs = result.scalars().all()
     return [TestRunResponse.model_validate(tr) for tr in test_runs]

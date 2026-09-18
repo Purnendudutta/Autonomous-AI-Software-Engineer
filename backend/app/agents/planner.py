@@ -164,6 +164,9 @@ Produce the structured Execution Plan JSON according to the schema."""
         data = extract_json_from_response(response.content)
     except Exception as exc:
         logger.error("planning_llm_failed", error=str(exc))
+        err_msg = str(exc)
+        if any(keyword in err_msg.lower() for keyword in ("auth", "401", "key", "quota", "credit", "429", "model", "404")):
+            raise RuntimeError(f"LLM planning failed: {err_msg}") from exc
         data = {}
 
     # Extract or build structured plan

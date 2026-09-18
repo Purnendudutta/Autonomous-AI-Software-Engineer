@@ -65,6 +65,9 @@ Generate comprehensive, non-trivial test cases for these modifications."""
         data = extract_json_from_response(response.content)
     except Exception as exc:
         logger.warning("test_generation_llm_failed", error=str(exc))
+        err_msg = str(exc)
+        if any(keyword in err_msg.lower() for keyword in ("auth", "401", "key", "quota", "credit", "429", "model", "404")):
+            raise RuntimeError(f"LLM test generation failed: {err_msg}") from exc
         data = {}
 
     test_file_path = data.get("test_file_path") or ("tests/unit/test_generated_auto.py" if "python" in framework.lower() else "tests/generated.test.ts")
@@ -127,6 +130,18 @@ async def test_execution_node(state: AgentState) -> dict[str, Any]:
     session_factory = get_session_factory()
     async with session_factory() as session:
         try:
+            from app.database.models import TestResult
+            raw_items = parsed.get("items", [])
+            test_results = [
+                TestResult(
+                    test_name=item.get("test_name", "test"),
+                    test_file=item.get("test_file"),
+                    status=item.get("status", "passed"),
+                    duration_seconds=item.get("duration_seconds"),
+                    failure_message=item.get("failure_message"),
+                )
+                for item in raw_items
+            ]
             test_run_record = TestRun(
                 task_id=task_id,
                 attempt_number=state.get("retry_count", 0) + 1,
@@ -140,7 +155,7 @@ async def test_execution_node(state: AgentState) -> dict[str, Any]:
                 tests_passed=passed_count,
                 tests_failed=failed_count,
                 tests_skipped=parsed.get("skipped", 0),
-                results=parsed.get("items", []),
+                results=test_results,
             )
             session.add(test_run_record)
             await session.commit()
