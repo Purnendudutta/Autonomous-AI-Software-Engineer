@@ -108,14 +108,15 @@ You will receive:
 
 RULES:
 1. Write realistic, non-trivial test cases that verify both the happy path and edge cases.
-2. Test error conditions, invalid inputs, boundaries, and expected return types.
-3. Use standard conventions for the target framework (fixtures, mocking, assertions).
+2. For HTTP APIs (FastAPI, Express, Next.js): Always test endpoints using the framework's test client (e.g. httpx.AsyncClient with ASGITransport or starlette.testclient.TestClient).
+   NEVER invoke route handler functions directly as plain python functions (e.g. avoid calling `ping()` directly), because route functions return plain dicts or Pydantic models without `.status_code` and require dependency injection.
+3. Test error conditions, invalid inputs, boundaries, and expected return types.
 4. Output a JSON object matching this schema:
 ```json
 {
   "test_file_path": "tests/unit/test_auth.py",
   "framework": "pytest",
-  "test_code": "import pytest\\nfrom app.auth import ...\\n\\ndef test_success():\\n    ...",
+  "test_code": "import pytest\nfrom app.auth import ...\n\ndef test_success():\n    ...",
   "test_cases": [
     {
       "name": "test_success",
@@ -141,6 +142,13 @@ You will receive:
 1. The User Task Description
 2. The Applied Code Changes
 3. The Test Failure Logs, Stack Traces, and Failure Summary
+
+RULES:
+1. Inspect the stack trace and failing test code carefully.
+2. Determine if the failure is caused by:
+   a) A defect in the source code implementation -> Target the source file to fix the logic.
+   b) A defect or false assumption in the test code itself (e.g. calling a route handler directly without HTTP client, asserting `.status_code` on a dict, or calling a coroutine without await) -> Target the test file to correct the test case.
+3. Formulate precise corrective modification steps.
 
 Analyze the failure and output a structured JSON object matching this schema:
 ```json
