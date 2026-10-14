@@ -38,7 +38,28 @@ An enterprise-grade, fully autonomous AI software engineering system capable of 
 
 ---
 
+## 📸 Screenshots & UI Showcase
+
+### 1. System Overview Dashboard
+*Real-time multi-agent orchestration status, active agent nodes, ingested repositories, and task resolution metrics.*
+![System Overview Dashboard](docs/screenshots/01-system-overview.jpg)
+
+### 2. Autonomous Engineering Tasks
+*Interactive task assigner with beginner quick templates, natural language prompt specification, and historical run tracking.*
+![Engineering Tasks](docs/screenshots/04-engineering-tasks.png)
+
+### 3. Codebase Intelligence & Architecture Explorer
+*Deep semantic analysis of cloned repositories, automatic language composition breakdowns, framework detection, and file exploration.*
+![Codebase Intelligence & Architecture Explorer](docs/screenshots/03-codebase-intelligence.png)
+
+### 4. Repository Ingestion & Semantic RAG
+*One-click ingestion of remote GitHub repositories with AST code parsing and vector search indexing.*
+![Repository Ingestion & Analysis](docs/screenshots/02-repositories-rag.png)
+
+---
+
 ## ⚡ Quickstart
+
 
 ### Prerequisites
 * [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Running)
