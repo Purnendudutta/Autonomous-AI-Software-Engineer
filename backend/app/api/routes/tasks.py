@@ -20,10 +20,12 @@ from app.schemas.report import CodeReviewResponse, ReportResponse, ReviewFinding
 from app.schemas.task import (
     TaskCancelResponse,
     TaskCreateRequest,
+    TaskGitPushRequest,
+    TaskGitPushResponse,
     TaskResponse,
     TaskStatusResponse,
 )
-from app.services.tasks import execute_agent_task, register_subscriber, unregister_subscriber
+from app.services.tasks import execute_agent_task, get_cached_plan, register_subscriber, unregister_subscriber
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -91,8 +93,40 @@ async def list_tasks(
 
 @router.get("/{task_id}", response_model=TaskResponse, summary="Get task details")
 async def get_task(task_id: str, session: SessionDep) -> TaskResponse:
-    """Return full task details."""
+    """Return full task details including execution_plan."""
     task = await _get_task_or_404(task_id, session)
+    resp = TaskResponse.model_validate(task)
+
+    plan_data = get_cached_plan(task_id)
+    if not plan_data:
+        agent_repo = AgentRunRepo(session)
+        steps = await agent_repo.get_steps_for_task(task_id)
+        for s in reversed(steps):
+            if s.step_metadata and isinstance(s.step_metadata, dict) and s.step_metadata.get("execution_plan"):
+                plan_data = s.step_metadata["execution_plan"]
+                break
+
+    resp.execution_plan = plan_data
+    return resp
+
+
+@router.post(
+    "/{task_id}/retry",
+    response_model=TaskResponse,
+    summary="Re-run an existing task",
+)
+async def retry_task(
+    task_id: str,
+    background_tasks: BackgroundTasks,
+    session: SessionDep,
+) -> TaskResponse:
+    """Reset task status and re-run the autonomous agent pipeline."""
+    task = await _get_task_or_404(task_id, session)
+    task_repo = TaskRepo(session)
+    await task_repo.update_status(task_id, status="pending", error_message=None, retry_count=0)
+    await session.commit()
+    await session.refresh(task)
+    background_tasks.add_task(execute_agent_task, task_id=task.id)
     return TaskResponse.model_validate(task)
 
 
@@ -315,6 +349,73 @@ async def delete_task(task_id: str, session: SessionDep):
     return {"task_id": task_id, "deleted": True, "message": f"Task '{task_id}' deleted."}
 
 
+# ─── Commit & Push to GitHub ─────────────────────────────────────────────────
+
+@router.post(
+    "/{task_id}/push",
+    response_model=TaskGitPushResponse,
+    summary="Commit and push workspace changes to the remote GitHub repository",
+)
+async def push_task_to_github(
+    task_id: str,
+    body: TaskGitPushRequest,
+    session: SessionDep,
+) -> TaskGitPushResponse:
+    """
+    Stage all modified/created files in the task's repository workspace,
+    create a Git commit, and push to the remote GitHub repository.
+    """
+    from pathlib import Path
+    from app.repository.clone import commit_and_push_workspace
+
+    task = await _get_task_or_404(task_id, session)
+    repo_db = RepositoryRepo(session)
+    repo = await repo_db.get_by_id(task.repository_id)
+    if not repo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Associated repository not found.",
+        )
+
+    snapshot = await repo_db.get_latest_snapshot(task.repository_id)
+    if not snapshot or not snapshot.workspace_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No local workspace found for this repository.",
+        )
+
+    commit_msg = (body.commit_message or "").strip() or f"AI Task: {task.description[:120]}"
+    target_branch = (body.branch or "").strip() or task.branch or snapshot.branch or repo.default_branch or "main"
+
+    try:
+        result = await asyncio.to_thread(
+            commit_and_push_workspace,
+            workspace_path=Path(snapshot.workspace_path),
+            repo_url=repo.url,
+            commit_message=commit_msg,
+            branch=target_branch,
+            github_token=body.github_token,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        )
+
+    return TaskGitPushResponse(
+        task_id=task_id,
+        commit_sha=result["commit_sha"],
+        branch=result["branch"],
+        commit_url=result["commit_url"],
+        message=result["message"],
+    )
+
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 async def _get_task_or_404(task_id: str, session):
@@ -327,3 +428,4 @@ async def _get_task_or_404(task_id: str, session):
             detail=f"Task '{task_id}' not found.",
         )
     return task
+

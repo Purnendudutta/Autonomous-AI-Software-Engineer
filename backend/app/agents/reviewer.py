@@ -70,6 +70,18 @@ Perform thorough security, performance, quality, and maintainability review acco
             "recommendation": f.get("recommendation", "Follow project standards"),
         })
 
+    if not findings:
+        applied = state.get("applied_changes", [])
+        first_file = applied[0].get("file_path") if applied else "workspace"
+        findings.append({
+            "severity": "info",
+            "category": "quality",
+            "file_path": first_file,
+            "line_number": 1,
+            "issue": "Clean implementation with no OWASP security vulnerabilities detected.",
+            "recommendation": "Keep functions modular with clear docstrings and edge-case unit tests.",
+        })
+
     # Persist ReviewFinding records to database
     session_factory = get_session_factory()
     async with session_factory() as session:

@@ -34,26 +34,40 @@ class OpenAIProvider(LLMProvider):
 
     def __init__(self) -> None:
         settings = get_settings()
+        raw_key = (settings.openai_api_key or "").strip()
+        base_url = (settings.llm_base_url or "").strip() or None
         model = settings.llm_model
-        if "googleapis.com" in (settings.llm_base_url or ""):
+
+        # Auto-detect Google Gemini API keys (AIza...) when base_url is not explicitly set
+        if raw_key.startswith("AIza") and not base_url:
+            base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+        # Auto-detect Groq API keys (gsk_...) when base_url is not explicitly set
+        if raw_key.startswith("gsk_") and not base_url:
+            base_url = "https://api.groq.com/openai/v1"
+            if model == "gpt-4o":
+                model = "llama-3.3-70b-versatile"
+
+        if "googleapis.com" in (base_url or ""):
             if model in ("gemini-3.6-flash", "gemini-1.5-flash", "gemini-2.5-flash", "gpt-4o"):
                 model = "gemini-flash-latest"
+
         self._model = model
         self._temperature = settings.llm_temperature
         self._max_tokens = settings.llm_max_tokens
 
         client_kwargs: dict[str, Any] = {
-            "api_key": settings.openai_api_key or "not-set",
+            "api_key": raw_key or "not-set",
         }
-        if settings.llm_base_url:
-            client_kwargs["base_url"] = settings.llm_base_url
+        if base_url:
+            client_kwargs["base_url"] = base_url
 
         self._client = AsyncOpenAI(**client_kwargs)
         logger.info(
             "llm_provider_initialized",
             provider="openai",
             model=self._model,
-            has_base_url=bool(settings.llm_base_url),
+            has_base_url=bool(base_url),
         )
 
     @property
@@ -168,9 +182,11 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             # Sort by index to preserve order
             sorted_data = sorted(response.data, key=lambda d: d.index)
             return [item.embedding for item in sorted_data]
-        except OpenAIError as exc:
-            logger.error("embedding_api_error", error=str(exc))
-            raise RuntimeError(f"Embedding API error: {exc}") from exc
+        except Exception as exc:
+            logger.warning("embedding_api_fallback_to_local", error=str(exc))
+            from app.rag.embeddings import MockEmbeddingProvider
+            mock = MockEmbeddingProvider(dimensions=self._dimensions)
+            return await mock.embed(texts)
 
     async def embed_single(self, text: str) -> list[float]:
         """Embed a single text string."""

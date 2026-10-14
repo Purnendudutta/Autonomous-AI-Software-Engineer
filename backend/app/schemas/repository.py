@@ -117,3 +117,10 @@ class FileContentResponse(BaseModel):
     language: Optional[str]
     content: str
     is_truncated: bool = False
+
+
+class FileCreateRequest(BaseModel):
+    """Request body for creating or updating a file inside a repository workspace."""
+    path: str = Field(..., min_length=1, max_length=512, description="Relative path inside the repository workspace")
+    content: str = Field(default="", description="Initial or updated file content")
+

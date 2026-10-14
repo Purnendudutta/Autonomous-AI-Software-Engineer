@@ -28,6 +28,7 @@ from app.repository.analyzer import analyze_repository, build_file_tree_node, de
 from app.repository.clone import WorkspaceManager, clone_repository
 from app.schemas.repository import (
     FileContentResponse,
+    FileCreateRequest,
     FileTreeNode,
     RepositoryAnalyzeRequest,
     RepositoryResponse,
@@ -335,3 +336,63 @@ async def get_repository_file(
         content=content,
         is_truncated=is_truncated,
     )
+
+
+@router.post(
+    "/{repository_id}/file",
+    response_model=FileContentResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create or update a file inside the repository workspace",
+)
+async def create_or_update_repository_file(
+    repository_id: str,
+    payload: FileCreateRequest,
+    session: SessionDep,
+) -> FileContentResponse:
+    """
+    Create or overwrite a file inside the cloned repository workspace safely.
+    """
+    repo_db = RepositoryRepo(session)
+    snapshot = await repo_db.get_latest_snapshot(repository_id)
+    if not snapshot or not snapshot.workspace_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No workspace found for repository '{repository_id}'. Please analyze it first.",
+        )
+
+    workspace_dir = Path(snapshot.workspace_path)
+    clean_rel_path = payload.path.strip().lstrip("/\\").replace("\\", "/")
+    if not clean_rel_path or clean_rel_path.startswith(".git"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file path.",
+        )
+
+    try:
+        target_file = validate_workspace_path(str(workspace_dir), clean_rel_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    is_new = not target_file.exists()
+    try:
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        target_file.write_text(payload.content, encoding="utf-8")
+        file_size = target_file.stat().st_size
+        if is_new and snapshot.file_count is not None:
+            snapshot.file_count = (snapshot.file_count or 0) + 1
+            await session.commit()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to write file: {exc}",
+        )
+
+    return FileContentResponse(
+        path=clean_rel_path,
+        filename=target_file.name,
+        size_bytes=file_size,
+        language=detect_file_language(target_file),
+        content=payload.content,
+        is_truncated=False,
+    )
+

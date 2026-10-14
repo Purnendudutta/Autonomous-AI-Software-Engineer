@@ -20,6 +20,8 @@ import type {
   Repository,
   RepositorySnapshot,
   Task,
+  TaskGitPushRequest,
+  TaskGitPushResponse,
   TaskStatusResponse,
   TestRun,
 } from '@/types'
@@ -96,6 +98,14 @@ export const repositoryApi = {
     return data
   },
 
+  createFile: async (id: string, path: string, content: string = ''): Promise<FileContentResponse> => {
+    const { data } = await apiClient.post<FileContentResponse>(`/api/repositories/${id}/file`, {
+      path,
+      content,
+    })
+    return data
+  },
+
   indexRepository: async (repositoryId: string): Promise<IndexStatusResponse> => {
     const { data } = await apiClient.post<IndexStatusResponse>(`/api/repositories/${repositoryId}/index`)
     return data
@@ -157,6 +167,11 @@ export const taskApi = {
     return data
   },
 
+  retry: async (taskId: string): Promise<Task> => {
+    const { data } = await apiClient.post<Task>(`/api/tasks/${taskId}/retry`)
+    return data
+  },
+
   delete: async (taskId: string): Promise<{ task_id: string; deleted: boolean }> => {
     const { data } = await apiClient.delete(`/api/tasks/${taskId}`)
     return data
@@ -164,6 +179,11 @@ export const taskApi = {
 
   clearFailed: async (): Promise<{ deleted_count: number; message: string }> => {
     const { data } = await apiClient.delete('/api/tasks/failed/clear')
+    return data
+  },
+
+  pushToGithub: async (taskId: string, request: TaskGitPushRequest): Promise<TaskGitPushResponse> => {
+    const { data } = await apiClient.post<TaskGitPushResponse>(`/api/tasks/${taskId}/push`, request)
     return data
   },
 

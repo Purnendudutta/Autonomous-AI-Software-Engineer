@@ -1,6 +1,20 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Activity, Clock, GitCompare, RotateCcw, ShieldCheck, Target, Terminal, Shield, GitPullRequest } from 'lucide-react'
+import {
+  Activity,
+  Clock,
+  GitCompare,
+  RotateCcw,
+  ShieldCheck,
+  Target,
+  Terminal,
+  Shield,
+  GitPullRequest,
+  UploadCloud,
+  ExternalLink,
+  Loader2,
+  CheckCircle2,
+} from 'lucide-react'
 import { useTask } from '@/hooks/useTask'
 import { useSSE } from '@/hooks/useSSE'
 import { taskApi } from '@/services/api'
@@ -9,7 +23,7 @@ import { DiffViewer } from '@/components/DiffViewer'
 import { TestResultsViewer } from '@/components/TestResultsViewer'
 import { CodeReviewViewer } from '@/components/CodeReviewViewer'
 import { ReportViewer } from '@/components/ReportViewer'
-import type { CodeReviewResponse, DiffResponse, ReportResponse, TestRun } from '@/types'
+import type { CodeReviewResponse, DiffResponse, ReportResponse, TaskGitPushResponse, TestRun } from '@/types'
 
 const STATUS_COLORS: Record<string, string> = {
   pending:        'badge-neutral',
@@ -34,12 +48,22 @@ const GRAPH_NODES = [
 
 export function TaskDetail() {
   const { taskId } = useParams<{ taskId: string }>()
-  const { task, loading, error } = useTask(taskId ?? null)
+  const { task, loading, error, refetch } = useTask(taskId ?? null)
   const [activeTab, setActiveTab] = useState<'plan' | 'diff' | 'tests' | 'review' | 'report'>('plan')
   const [diffData, setDiffData] = useState<DiffResponse | null>(null)
   const [testRuns, setTestRuns] = useState<TestRun[]>([])
   const [reviewData, setReviewData] = useState<CodeReviewResponse | null>(null)
   const [reportData, setReportData] = useState<ReportResponse | null>(null)
+  const [retrying, setRetrying] = useState(false)
+
+  // GitHub Commit & Push state
+  const [showPushPanel, setShowPushPanel] = useState(false)
+  const [commitMessage, setCommitMessage] = useState('')
+  const [pushBranch, setPushBranch] = useState('')
+  const [githubToken, setGithubToken] = useState('')
+  const [pushing, setPushing] = useState(false)
+  const [pushResult, setPushResult] = useState<TaskGitPushResponse | null>(null)
+  const [pushError, setPushError] = useState<string | null>(null)
 
   const { events, connected } = useSSE(
     task && !['succeeded', 'failed', 'cancelled', 'blocked'].includes(task.status)
@@ -55,6 +79,47 @@ export function TaskDetail() {
       taskApi.getReport(taskId).then(setReportData).catch(() => setReportData(null))
     }
   }, [taskId, task?.status])
+
+  useEffect(() => {
+    if (task && !commitMessage) {
+      setCommitMessage(`feat(ai): ${task.description.slice(0, 72)}`)
+    }
+    if (task?.branch && !pushBranch) {
+      setPushBranch(task.branch)
+    }
+  }, [task, commitMessage, pushBranch])
+
+  const handleRetry = async () => {
+    if (!taskId) return
+    setRetrying(true)
+    try {
+      await taskApi.retry(taskId)
+      refetch()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to retry task')
+    } finally {
+      setRetrying(false)
+    }
+  }
+
+  const handlePushToGithub = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!taskId) return
+    setPushing(true)
+    setPushError(null)
+    try {
+      const res = await taskApi.pushToGithub(taskId, {
+        commit_message: commitMessage.trim() || undefined,
+        branch: pushBranch.trim() || undefined,
+        github_token: githubToken.trim() || undefined,
+      })
+      setPushResult(res)
+    } catch (err) {
+      setPushError(err instanceof Error ? err.message : 'Failed to push commit to GitHub')
+    } finally {
+      setPushing(false)
+    }
+  }
 
   if (loading) return <p className="text-[#8b949e]">Loading task…</p>
   if (error)   return <p className="text-red-400">{error}</p>
@@ -84,7 +149,135 @@ export function TaskDetail() {
           </div>
           <p className="text-[#8b949e] text-sm">{task.description}</p>
         </div>
+
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            onClick={() => setShowPushPanel((v) => !v)}
+            disabled={task.status === 'running'}
+            className="px-3 py-1.5 bg-[#238636] hover:bg-[#2ea043] disabled:opacity-50 text-white text-xs font-medium rounded-md flex items-center gap-1.5 transition-colors"
+          >
+            <UploadCloud className="w-3.5 h-3.5" />
+            Commit & Push to GitHub
+          </button>
+
+          <button
+            onClick={handleRetry}
+            disabled={retrying || task.status === 'running'}
+            className="btn btn-secondary text-xs flex items-center gap-1.5 py-1.5 px-3"
+          >
+            <RotateCcw className={`w-3.5 h-3.5 ${retrying ? 'animate-spin' : ''}`} />
+            {retrying ? 'Re-launching…' : 'Re-run Task'}
+          </button>
+        </div>
       </div>
+
+      {/* Commit & Push to GitHub Panel */}
+      {showPushPanel && (
+        <div className="surface p-4 border border-[#238636]/60 bg-[#0d1117] space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-green-400 flex items-center gap-1.5">
+              <UploadCloud className="w-4 h-4" />
+              Commit & Push Changes to Original GitHub Repository
+            </h3>
+            <button
+              type="button"
+              onClick={() => setShowPushPanel(false)}
+              className="text-xs text-[#8b949e] hover:text-white"
+            >
+              Close
+            </button>
+          </div>
+
+          {pushResult ? (
+            <div className="p-3 rounded-md bg-green-950/40 border border-green-800 text-xs text-green-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+                <span>
+                  {pushResult.message} — Branch: <strong className="font-mono">{pushResult.branch}</strong>
+                </span>
+              </div>
+              <a
+                href={pushResult.commit_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-green-300 hover:text-white underline font-mono"
+              >
+                View Commit on GitHub ({pushResult.commit_sha.slice(0, 7)})
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            </div>
+          ) : (
+            <form onSubmit={handlePushToGithub} className="grid grid-cols-1 md:grid-cols-12 gap-3">
+              <div className="md:col-span-5">
+                <label className="block text-[11px] text-[#8b949e] mb-1">Commit Message</label>
+                <input
+                  type="text"
+                  value={commitMessage}
+                  onChange={(e) => setCommitMessage(e.target.value)}
+                  placeholder="feat(ai): implement requested changes"
+                  className="w-full px-3 py-1.5 bg-[#161b22] border border-[#30363d] rounded text-xs text-white focus:outline-none focus:border-[#388bfd]"
+                  required
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-[11px] text-[#8b949e] mb-1">Target Branch</label>
+                <input
+                  type="text"
+                  value={pushBranch}
+                  onChange={(e) => setPushBranch(e.target.value)}
+                  placeholder="main"
+                  className="w-full px-3 py-1.5 bg-[#161b22] border border-[#30363d] rounded text-xs text-white font-mono focus:outline-none focus:border-[#388bfd]"
+                />
+              </div>
+              <div className="md:col-span-3">
+                <label className="block text-[11px] text-[#8b949e] mb-1">
+                  GitHub Token (optional if in <code className="text-[#e6edf3]">.env</code>)
+                </label>
+                <input
+                  type="password"
+                  value={githubToken}
+                  onChange={(e) => setGithubToken(e.target.value)}
+                  placeholder="ghp_... or github_pat_..."
+                  className="w-full px-3 py-1.5 bg-[#161b22] border border-[#30363d] rounded text-xs text-white font-mono focus:outline-none focus:border-[#388bfd]"
+                />
+              </div>
+              <div className="md:col-span-2 flex items-end">
+                <button
+                  type="submit"
+                  disabled={pushing}
+                  className="w-full py-1.5 px-3 bg-[#238636] hover:bg-[#2ea043] disabled:opacity-50 text-white text-xs font-medium rounded flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  {pushing ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Pushing…
+                    </>
+                  ) : (
+                    <>
+                      <UploadCloud className="w-3.5 h-3.5" />
+                      Push Now
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {pushError && (
+            <p className="text-xs text-red-400 font-mono bg-red-950/30 border border-red-800/60 p-2 rounded">
+              {pushError}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Error Diagnostic Banner if Task Failed */}
+      {task.error_message && (
+        <div className="p-4 rounded-lg bg-red-950/30 border border-red-800/80 text-xs text-red-200 space-y-1">
+          <p className="font-semibold text-red-300">Task Diagnostic Details:</p>
+          <p className="font-mono break-all text-[11px]">{task.error_message}</p>
+        </div>
+      )}
 
       {/* Workflow Step Indicator */}
       <div className="surface p-4">

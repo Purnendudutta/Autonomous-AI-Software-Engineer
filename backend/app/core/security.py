@@ -129,6 +129,8 @@ ALLOWED_SANDBOX_COMMANDS: frozenset[str] = frozenset({
     "go",
     "mvn",
     "gradle",
+    "javac",
+    "java",
     "ruff",
     "mypy",
     "flake8",

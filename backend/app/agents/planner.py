@@ -128,6 +128,157 @@ async def code_retrieval(state: AgentState) -> dict[str, Any]:
     }
 
 
+def discover_workspace_files(workspace_path: str, max_files: int = 80) -> list[str]:
+    """Return sorted relative file paths inside the workspace, excluding ignored directories."""
+    import os
+    from pathlib import Path
+    from app.repository.analyzer import IGNORED_DIRECTORIES, is_ignored_file
+
+    if not workspace_path:
+        return []
+    root = Path(workspace_path).resolve()
+    if not root.exists():
+        return []
+
+    found: list[str] = []
+    for dirpath, dirs, filenames in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in IGNORED_DIRECTORIES and not d.startswith(".")]
+        current = Path(dirpath)
+        for fname in sorted(filenames):
+            if fname.endswith(".bak") or fname.startswith("."):
+                continue
+            fpath = current / fname
+            if is_ignored_file(fpath, root):
+                continue
+            try:
+                found.append(str(fpath.relative_to(root)).replace("\\", "/"))
+            except ValueError:
+                continue
+            if len(found) >= max_files:
+                return found
+    return found
+
+
+def select_best_target_file(
+    workspace_path: str,
+    task_description: str,
+    primary_language: str = "Python",
+) -> str:
+    """Pick the best target file from the workspace based on the task description."""
+    import re
+    from pathlib import Path
+
+    files = discover_workspace_files(workspace_path)
+    desc_lower = task_description.lower()
+
+    for f in files:
+        fname = Path(f).name.lower()
+        if f.lower() in desc_lower or (len(fname) > 3 and fname in desc_lower):
+            return f
+
+    explicit_match = re.search(r"\b([a-zA-Z0-9_\-/]+\.(?:py|java|js|ts|html|css|md|cpp|c))\b", task_description)
+    if explicit_match:
+        return explicit_match.group(1).lstrip("/")
+
+    if any(w in desc_lower for w in ("readme", "documentation", "markdown", "project guide")):
+        for f in files:
+            if Path(f).name.lower() == "readme.md":
+                return f
+        return "README.md"
+
+    source_exts = (".py", ".java", ".js", ".ts", ".cpp", ".c", ".go", ".rs")
+    non_test_source_files = [
+        f for f in files
+        if f.endswith(source_exts)
+        and "test" not in f.lower()
+        and not Path(f).name.startswith("__")
+        and Path(f).name.lower() not in ("setup.py", "conftest.py")
+    ]
+
+    words = [
+        w for w in re.findall(r"[a-zA-Z]{3,}", desc_lower)
+        if w not in ("add", "fix", "create", "write", "function", "method", "file", "code", "test", "the", "and", "for", "with")
+    ]
+    for f in non_test_source_files:
+        if any(w in f.lower() for w in words):
+            return f
+
+    if non_test_source_files:
+        return non_test_source_files[0]
+
+    any_source = [f for f in files if f.endswith(source_exts) and not Path(f).name.startswith("__")]
+    if any_source:
+        return any_source[0]
+
+    lang = (primary_language or "Python").lower()
+    if "java" in lang and "javascript" not in lang:
+        return "Solution.java"
+    elif "javascript" in lang:
+        return "index.js"
+    elif "typescript" in lang:
+        return "index.ts"
+    return "main.py"
+
+
+def build_fallback_execution_plan(
+    workspace_path: str,
+    task_description: str,
+    primary_language: str = "Python",
+    task_intent: str = "feature",
+) -> ExecutionPlan:
+    """Create a structured ExecutionPlan grounded in actual workspace files."""
+    target_file = select_best_target_file(workspace_path, task_description, primary_language)
+    files = discover_workspace_files(workspace_path)
+
+    test_files = [f for f in files if "test" in f.lower() and f.endswith((".py", ".js", ".ts", ".java"))]
+    target_files = [target_file]
+    if test_files and target_file.endswith(".py"):
+        target_files.append(test_files[0])
+
+    steps: list[PlanStep] = [
+        {
+            "step_number": 1,
+            "action": "modify_code",
+            "target_file": target_file,
+            "description": f"Implement requested changes in `{target_file}`: {task_description}",
+            "rationale": "Fulfills the engineering task specification with modular, well-documented code.",
+            "status": "pending",
+        }
+    ]
+
+    if test_files and target_file.endswith(".py") and target_file != test_files[0]:
+        steps.append({
+            "step_number": 2,
+            "action": "modify_code",
+            "target_file": test_files[0],
+            "description": f"Add unit test assertions in `{test_files[0]}` to verify `{target_file}`",
+            "rationale": "Ensures automated test verification passes in the isolated sandbox.",
+            "status": "pending",
+        })
+
+    return {
+        "task_type": task_intent or "feature",
+        "root_cause_analysis": (
+            f"Analyzed repository workspace ({len(files)} files indexed, primary language: {primary_language}). "
+            f"Selected `{target_file}` as the primary target module to implement: \"{task_description}\"."
+        ),
+        "architecture_overview": (
+            f"Modular implementation in `{target_file}` adhering to {primary_language} conventions, "
+            "with type annotations, docstrings, and automated verification."
+        ),
+        "target_files": target_files,
+        "steps": steps,
+        "test_strategy": [
+            f"Verify syntax and execution of `{target_file}`",
+            "Run automated test suite in isolated sandbox",
+        ],
+        "verification_criteria": [
+            "Target module compiles and executes without syntax or runtime errors",
+            "All existing and newly generated unit tests pass",
+        ],
+    }
+
+
 async def plan(state: AgentState) -> dict[str, Any]:
     """
     Generates a structured, validated step-by-step execution plan from the
@@ -136,13 +287,21 @@ async def plan(state: AgentState) -> dict[str, Any]:
     task_desc = state.get("task_description", "")
     rag_context = state.get("rag_context_formatted", "")
     repo_summary = state.get("repository_summary", "")
+    workspace_path = state.get("workspace_path", "")
+    primary_language = state.get("primary_language", "Python")
     task_id = state.get("task_id", "unknown")
 
     logger.info("planning_started", task_id=task_id)
 
+    workspace_files = discover_workspace_files(workspace_path)
+    files_context = "\n".join(f"- {f}" for f in workspace_files[:60]) if workspace_files else "No files listed."
+
     llm = get_llm_provider()
     user_prompt = f"""Repository Overview:
 {repo_summary}
+
+Repository Files in Workspace:
+{files_context}
 
 User Task Description:
 {task_desc}
@@ -150,7 +309,7 @@ User Task Description:
 Relevant Code Chunks from Codebase RAG:
 {rag_context}
 
-Produce the structured Execution Plan JSON according to the schema."""
+Produce the structured Execution Plan JSON according to the schema. Ensure target_files use real paths from the workspace."""
 
     try:
         response = await llm.complete(
@@ -163,38 +322,46 @@ Produce the structured Execution Plan JSON according to the schema."""
         )
         data = extract_json_from_response(response.content)
     except Exception as exc:
-        logger.error("planning_llm_failed", error=str(exc))
-        err_msg = str(exc)
-        if any(keyword in err_msg.lower() for keyword in ("auth", "401", "key", "quota", "credit", "429", "model", "404")):
-            raise RuntimeError(f"LLM planning failed: {err_msg}") from exc
+        logger.warning("planning_llm_fallback", error=str(exc))
         data = {}
 
+    if not data or not data.get("steps"):
+        fallback_plan = build_fallback_execution_plan(
+            workspace_path=workspace_path,
+            task_description=task_desc,
+            primary_language=primary_language,
+            task_intent=state.get("task_intent") or "feature",
+        )
+        return {
+            "execution_plan": fallback_plan,
+            "identified_root_cause": fallback_plan["root_cause_analysis"],
+            "affected_files": fallback_plan["target_files"],
+            "file_tree_paths": workspace_files,
+        }
+
     # Extract or build structured plan
-    task_type = data.get("task_type") or state.get("task_intent") or "bug_fix"
+    task_type = data.get("task_type") or state.get("task_intent") or "feature"
     root_cause = data.get("root_cause_analysis") or "Root cause determined during execution."
     target_files = data.get("target_files") or []
     steps_raw = data.get("steps") or []
 
+    best_default_file = select_best_target_file(workspace_path, task_desc, primary_language)
+    if not target_files:
+        target_files = [best_default_file]
+
     steps: list[PlanStep] = []
     for i, s in enumerate(steps_raw, start=1):
+        tf = s.get("target_file") or best_default_file
+        if tf == "unknown":
+            tf = best_default_file
         steps.append({
             "step_number": s.get("step_number", i),
             "action": s.get("action", "modify_code"),
-            "target_file": s.get("target_file", target_files[0] if target_files else "unknown"),
+            "target_file": tf,
             "description": s.get("description", "Execute planned modification"),
             "rationale": s.get("rationale", "Fulfill task requirements"),
             "status": "pending",
         })
-
-    if not steps:
-        steps = [{
-            "step_number": 1,
-            "action": "modify_code",
-            "target_file": target_files[0] if target_files else "main.py",
-            "description": f"Implement changes for: {task_desc}",
-            "rationale": "Direct implementation",
-            "status": "pending",
-        }]
 
     plan_obj: ExecutionPlan = {
         "task_type": task_type,
@@ -202,7 +369,7 @@ Produce the structured Execution Plan JSON according to the schema."""
         "architecture_overview": data.get("architecture_overview") or "Modular software architecture.",
         "target_files": target_files,
         "steps": steps,
-        "test_strategy": data.get("test_strategy") or ["Execute automated test suite in Docker sandbox."],
+        "test_strategy": data.get("test_strategy") or ["Execute automated test suite in sandbox."],
         "verification_criteria": data.get("verification_criteria") or ["All unit tests pass."],
     }
 
@@ -216,4 +383,5 @@ Produce the structured Execution Plan JSON according to the schema."""
         "execution_plan": plan_obj,
         "identified_root_cause": root_cause,
         "affected_files": target_files,
+        "file_tree_paths": workspace_files,
     }

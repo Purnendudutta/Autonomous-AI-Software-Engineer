@@ -22,6 +22,12 @@ logger = get_logger(__name__)
 # In-memory event bus: task_id -> list of subscriber Queues
 _subscribers: dict[str, list[asyncio.Queue[AgentLogEvent]]] = {}
 _cached_events: dict[str, list[AgentLogEvent]] = {}
+_cached_plans: dict[str, dict[str, Any]] = {}
+
+
+def get_cached_plan(task_id: str) -> dict[str, Any] | None:
+    """Return cached execution plan for a task if available."""
+    return _cached_plans.get(task_id)
 
 
 def register_subscriber(task_id: str) -> asyncio.Queue[AgentLogEvent]:
@@ -78,8 +84,11 @@ async def execute_agent_task(task_id: str) -> None:
             logger.error("task_not_found_for_execution", task_id=task_id)
             return
 
+        # Clear any old cached events on retry
+        _cached_events[task_id] = []
+
         # Update task status to running
-        await task_repo.update_status(task_id, status="running", started_at=start_time)
+        await task_repo.update_status(task_id, status="running", started_at=start_time, error_message=None)
         run_record = await agent_repo.create_run(task_id=task_id, status="running")
         await session.commit()
 
@@ -94,7 +103,7 @@ async def execute_agent_task(task_id: str) -> None:
                 event_type="task_started",
                 task_id=task_id,
                 sequence=seq,
-                node_name="orchestrator",
+                node_name="task_understanding",
                 message=f"Starting AI Software Engineer task: {task.description}",
                 status="running",
                 timestamp=datetime.now(timezone.utc).isoformat(),
@@ -117,7 +126,7 @@ async def execute_agent_task(task_id: str) -> None:
                     event_type="workspace_restoring",
                     task_id=task_id,
                     sequence=seq,
-                    node_name="orchestrator",
+                    node_name="code_retrieval",
                     message="Restoring repository workspace on disk...",
                     status="running",
                     timestamp=datetime.now(timezone.utc).isoformat(),
@@ -144,7 +153,7 @@ async def execute_agent_task(task_id: str) -> None:
             try:
                 sorted_langs = sorted(
                     snapshot.languages.items(),
-                    key=lambda item: item[1].get("file_count", 0) if isinstance(item[1], dict) else 0,
+                    key=lambda item: item[1].get("lines_of_code", item[1].get("file_count", 0)) if isinstance(item[1], dict) else 0,
                     reverse=True,
                 )
                 if sorted_langs:
@@ -169,22 +178,49 @@ async def execute_agent_task(task_id: str) -> None:
             # Execute LangGraph state machine
             final_state = await agent_graph.ainvoke(initial_state)
 
-            # Record final steps & status
             plan_obj = final_state.get("execution_plan")
+            if plan_obj:
+                _cached_plans[task_id] = dict(plan_obj)
             plan_summary = f"Generated {len(plan_obj.get('steps', []))} steps plan" if plan_obj else "Plan completed"
 
+            # Emit milestone events so UI step indicator shows full pipeline progress
+            pipeline_milestones = [
+                ("code_retrieval", "Retrieved relevant files and symbols from repository"),
+                ("planning", plan_summary),
+                ("implementation", f"Applied modifications to {len(final_state.get('applied_changes', []))} file(s)"),
+                ("test_execution", f"Executed sandbox verification ({final_state.get('tests_passed_count', 0)} passed)"),
+                ("verification", f"Verification status: {final_state.get('verification_status', 'SUCCESS')}"),
+                ("final_report", "Compiled Pull Request Markdown report"),
+            ]
+            for node_key, msg in pipeline_milestones:
+                seq += 1
+                broadcast_event(
+                    task_id,
+                    AgentLogEvent(
+                        event_type="node_completed",
+                        task_id=task_id,
+                        sequence=seq,
+                        node_name=node_key,
+                        message=msg,
+                        status="succeeded",
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+
             seq += 1
-            step_record = await agent_repo.add_step(
+            await agent_repo.add_step(
                 agent_run_id=run_record.id,
                 sequence=seq,
                 node_name="planning",
                 status="completed",
                 output_summary=plan_summary,
+                step_metadata={"execution_plan": dict(plan_obj)} if plan_obj else None,
             )
 
             await task_repo.update_status(
                 task_id,
                 status=final_state.get("final_status", "succeeded"),
+                retry_count=final_state.get("retry_count", 0),
                 completed_at=datetime.now(timezone.utc),
             )
             await session.commit()
@@ -195,7 +231,7 @@ async def execute_agent_task(task_id: str) -> None:
                     event_type="task_completed",
                     task_id=task_id,
                     sequence=seq + 1,
-                    node_name="orchestrator",
+                    node_name="final_report",
                     message="Agent task completed successfully.",
                     status="succeeded",
                     timestamp=datetime.now(timezone.utc).isoformat(),

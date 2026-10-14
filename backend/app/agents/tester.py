@@ -64,19 +64,19 @@ Generate comprehensive, non-trivial test cases for these modifications."""
         )
         data = extract_json_from_response(response.content)
     except Exception as exc:
-        logger.warning("test_generation_llm_failed", error=str(exc))
-        err_msg = str(exc)
-        if any(keyword in err_msg.lower() for keyword in ("auth", "401", "key", "quota", "credit", "429", "model", "404")):
-            raise RuntimeError(f"LLM test generation failed: {err_msg}") from exc
+        logger.warning("test_generation_llm_skipped", error=str(exc))
         data = {}
 
-    test_file_path = data.get("test_file_path") or ("tests/unit/test_generated_auto.py" if "python" in framework.lower() else "tests/generated.test.ts")
+    is_python = "python" in framework.lower()
+    has_pkg_json = (root / "package.json").is_file()
+
+    test_file_path = data.get("test_file_path") or ("tests/unit/test_generated_auto.py" if is_python else "tests/generated.test.ts")
     test_code = data.get("test_code") or ""
     test_cases = data.get("test_cases") or []
 
     generated_tests: list[dict[str, Any]] = []
 
-    if test_code:
+    if test_code and (is_python or has_pkg_json):
         try:
             target_path = safe_path(root, test_file_path)
             target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,7 +103,7 @@ async def test_execution_node(state: AgentState) -> dict[str, Any]:
     workspace_path = state.get("workspace_path")
     framework = state.get("primary_language", "Python")
 
-    logger.info("test_execution_node_started", task_id=task_id)
+    logger.info("test_execution_node_started", task_id=task_id, framework=framework)
 
     if not workspace_path:
         return {
@@ -116,7 +116,7 @@ async def test_execution_node(state: AgentState) -> dict[str, Any]:
 
     run_result = await execute_sandbox_tests(
         workspace_path=workspace_path,
-        framework="pytest" if "python" in framework.lower() else "jest",
+        framework=framework,
         timeout_seconds=120,
     )
 

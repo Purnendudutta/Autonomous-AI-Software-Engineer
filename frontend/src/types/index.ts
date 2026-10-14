@@ -204,6 +204,20 @@ export interface CreateTaskRequest {
   target_commit?: string
 }
 
+export interface TaskGitPushRequest {
+  commit_message?: string
+  branch?: string
+  github_token?: string
+}
+
+export interface TaskGitPushResponse {
+  task_id: string
+  commit_sha: string
+  branch: string
+  commit_url: string
+  message: string
+}
+
 export interface TaskStatusResponse {
   task_id: string
   status: TaskStatus

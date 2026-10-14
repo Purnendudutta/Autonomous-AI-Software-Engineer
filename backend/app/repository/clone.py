@@ -285,3 +285,79 @@ async def clone_repository(
         committed_at=committed_at,
         total_size_bytes=total_size_bytes,
     )
+
+
+def commit_and_push_workspace(
+    workspace_path: Path,
+    repo_url: str,
+    commit_message: str,
+    branch: Optional[str] = None,
+    github_token: Optional[str] = None,
+) -> dict[str, str]:
+    """
+    Stage all changes in the workspace, create a Git commit, and push to the remote GitHub repository.
+    """
+    token_to_use = (github_token or settings.github_token or "").strip()
+    if not token_to_use:
+        raise ValueError(
+            "GitHub Personal Access Token is required to push to GitHub. "
+            "Please enter your token (ghp_... or github_pat_...) or set GITHUB_TOKEN in .env."
+        )
+
+    if not workspace_path.exists():
+        raise ValueError("Repository workspace directory does not exist on disk.")
+
+    try:
+        repo = git.Repo(workspace_path)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to open git repository in workspace: {exc}") from exc
+
+    # Configure local author identity so commit never fails on unconfigured machines
+    with repo.config_writer() as cw:
+        cw.set_value("user", "name", "Autonomous AI Software Engineer")
+        cw.set_value("user", "email", "ai-engineer@users.noreply.github.com")
+
+    # Stage all modified & untracked files
+    repo.git.add("-A")
+
+    status_porcelain = repo.git.status("--porcelain").strip()
+    if status_porcelain:
+        commit_obj = repo.index.commit(commit_message)
+        commit_sha = commit_obj.hexsha
+    else:
+        commit_sha = repo.head.commit.hexsha
+
+    # Determine target branch
+    target_branch = (branch or "").strip()
+    if not target_branch:
+        try:
+            target_branch = repo.active_branch.name
+        except TypeError:
+            target_branch = "main"
+
+    auth_url = build_authenticated_url(repo_url, token_to_use)
+    try:
+        repo.git.push(auth_url, f"HEAD:refs/heads/{target_branch}")
+    except GitCommandError as exc:
+        clean_err = sanitize_git_url(str(exc))
+        logger.error("git_push_failed", error=clean_err, branch=target_branch)
+        raise RuntimeError(f"Git push failed: {clean_err}") from exc
+
+    clean_repo_url = sanitize_git_url(repo_url).rstrip("/")
+    if clean_repo_url.endswith(".git"):
+        clean_repo_url = clean_repo_url[:-4]
+
+    commit_url = f"{clean_repo_url}/commit/{commit_sha}"
+    logger.info(
+        "git_push_succeeded",
+        commit_sha=commit_sha[:8],
+        branch=target_branch,
+        commit_url=commit_url,
+    )
+    return {
+        "commit_sha": commit_sha,
+        "branch": target_branch,
+        "commit_url": commit_url,
+        "message": f"Successfully committed and pushed to {target_branch} ({commit_sha[:8]})",
+    }
+

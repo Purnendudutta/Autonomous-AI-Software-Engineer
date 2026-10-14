@@ -4,7 +4,6 @@ import {
   GitBranch,
   ListTodo,
   Bot,
-  Activity,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
@@ -58,19 +57,7 @@ export function Sidebar() {
           ))}
         </div>
       </nav>
-
-      {/* Status Footer */}
-      <div className="px-4 py-3 border-t border-[#30363d] space-y-1">
-        <div className="flex items-center justify-between text-[11px] text-[#8b949e]">
-          <span className="flex items-center gap-1.5 font-mono text-green-400">
-            <Activity className="w-3.5 h-3.5" /> Engine Online
-          </span>
-          <span className="font-mono text-[10px] bg-[#21262d] px-1.5 py-0.5 rounded border border-[#30363d]">
-            v0.1.0
-          </span>
-        </div>
-        <p className="text-[10px] text-[#6e7681] truncate">LangGraph · pgvector · Docker</p>
-      </div>
     </aside>
   )
 }
+

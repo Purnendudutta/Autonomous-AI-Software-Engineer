@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import {
   GitBranch,
   FileCode2,
@@ -12,8 +12,11 @@ import {
   FileText,
   Search,
   Sparkles,
+  Play,
+  FilePlus2,
+  X,
 } from 'lucide-react'
-import { repositoryApi } from '@/services/api'
+import { repositoryApi, taskApi } from '@/services/api'
 import { FileTree } from '@/components/FileTree'
 import { CodeSearch } from '@/components/CodeSearch'
 import type { FileContentResponse, FileTreeNode, RepositorySnapshot, Repository } from '@/types'
@@ -32,6 +35,7 @@ const LANG_COLORS: Record<string, string> = {
 
 export function RepositoryDetail() {
   const { repoId } = useParams<{ repoId: string }>()
+  const navigate = useNavigate()
   const [repo, setRepo] = useState<Repository | null>(null)
   const [snapshot, setSnapshot] = useState<RepositorySnapshot | null>(null)
   const [tree, setTree] = useState<FileTreeNode | null>(null)
@@ -43,6 +47,16 @@ export function RepositoryDetail() {
   const [loading, setLoading] = useState(true)
   const [fileLoading, setFileLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // New file creation state
+  const [showNewFileForm, setShowNewFileForm] = useState(false)
+  const [newFilePath, setNewFilePath] = useState('')
+  const [newFileContent, setNewFileContent] = useState('')
+  const [creatingFile, setCreatingFile] = useState(false)
+
+  // Inline task execution on selected file
+  const [fileTaskPrompt, setFileTaskPrompt] = useState('')
+  const [runningFileTask, setRunningFileTask] = useState(false)
 
   useEffect(() => {
     async function loadRepositoryData() {
@@ -79,6 +93,46 @@ export function RepositoryDetail() {
       setFileContent(null)
     } finally {
       setFileLoading(false)
+    }
+  }
+
+  const handleCreateFile = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!repoId || !newFilePath.trim()) return
+    setCreatingFile(true)
+    try {
+      const created = await repositoryApi.createFile(repoId, newFilePath.trim(), newFileContent)
+      const updatedTree = await repositoryApi.getTree(repoId).catch(() => tree)
+      setTree(updatedTree)
+      setSelectedFilePath(created.path)
+      setFileContent(created)
+      setShowNewFileForm(false)
+      setNewFilePath('')
+      setNewFileContent('')
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to create file')
+    } finally {
+      setCreatingFile(false)
+    }
+  }
+
+  const handleRunTaskOnFile = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!repoId || !selectedFilePath || !fileTaskPrompt.trim()) return
+    setRunningFileTask(true)
+    try {
+      const promptWithFile = fileTaskPrompt.includes(selectedFilePath)
+        ? fileTaskPrompt.trim()
+        : `In ${selectedFilePath}: ${fileTaskPrompt.trim()}`
+      const task = await taskApi.create({
+        repository_id: repoId,
+        description: promptWithFile,
+      })
+      navigate(`/tasks/${task.id}`)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to start task on file')
+    } finally {
+      setRunningFileTask(false)
     }
   }
 
@@ -293,15 +347,66 @@ export function RepositoryDetail() {
                 <FileCode2 className="w-3.5 h-3.5 text-blue-400" />
                 Codebase Files
               </h3>
-              {tree && (
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setSelectedFilePath(null)}
-                  className="text-[11px] text-[#388bfd] hover:underline"
+                  onClick={() => setShowNewFileForm((v) => !v)}
+                  className="text-[11px] px-2 py-0.5 bg-[#238636]/20 hover:bg-[#238636]/40 text-green-400 border border-[#238636]/50 rounded flex items-center gap-1 transition-colors"
                 >
-                  View Summary
+                  <FilePlus2 className="w-3 h-3" />
+                  New File
                 </button>
-              )}
+                {tree && (
+                  <button
+                    onClick={() => setSelectedFilePath(null)}
+                    className="text-[11px] text-[#388bfd] hover:underline"
+                  >
+                    Summary
+                  </button>
+                )}
+              </div>
             </div>
+
+            {showNewFileForm && (
+              <form
+                onSubmit={handleCreateFile}
+                className="mb-3 p-2.5 bg-[#0d1117] border border-[#30363d] rounded-md space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-white">Create File in Repo</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewFileForm(false)}
+                    className="text-[#8b949e] hover:text-white"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={newFilePath}
+                  onChange={(e) => setNewFilePath(e.target.value)}
+                  placeholder="e.g. utils.py, Palindrome.java, app.js"
+                  className="w-full px-2.5 py-1.5 bg-[#161b22] border border-[#30363d] rounded text-xs text-white font-mono focus:outline-none focus:border-[#388bfd]"
+                  required
+                />
+                <textarea
+                  value={newFileContent}
+                  onChange={(e) => setNewFileContent(e.target.value)}
+                  placeholder="Optional starter code (or leave empty and let the AI write it)..."
+                  rows={3}
+                  className="w-full px-2.5 py-1.5 bg-[#161b22] border border-[#30363d] rounded text-xs text-white font-mono focus:outline-none focus:border-[#388bfd]"
+                />
+                <button
+                  type="submit"
+                  disabled={creatingFile || !newFilePath.trim()}
+                  className="w-full py-1.5 bg-[#238636] hover:bg-[#2ea043] disabled:opacity-50 text-white text-xs font-medium rounded transition-colors flex items-center justify-center gap-1.5"
+                >
+                  {creatingFile ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  {creatingFile ? 'Creating...' : 'Create File'}
+                </button>
+              </form>
+            )}
+
             <div className="flex-1 overflow-y-auto pr-1">
               {tree ? (
                 <FileTree
@@ -331,13 +436,41 @@ export function RepositoryDetail() {
                   )}
                 </div>
 
+                {/* Inline Run Task on Selected File Bar */}
+                <form
+                  onSubmit={handleRunTaskOnFile}
+                  className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-3 p-2.5 bg-[#161b22] border border-[#30363d] rounded-md"
+                >
+                  <input
+                    type="text"
+                    value={fileTaskPrompt}
+                    onChange={(e) => setFileTaskPrompt(e.target.value)}
+                    placeholder={`Give AI a task for ${selectedFilePath} (e.g. "Add a factorial(n) function" or "Add docstrings")...`}
+                    className="flex-1 px-3 py-1.5 bg-[#0d1117] border border-[#30363d] rounded text-xs text-white focus:outline-none focus:border-[#388bfd]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={runningFileTask || !fileTaskPrompt.trim()}
+                    className="px-3.5 py-1.5 bg-[#238636] hover:bg-[#2ea043] disabled:opacity-50 text-white text-xs font-medium rounded flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors"
+                  >
+                    {runningFileTask ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Play className="w-3.5 h-3.5" />
+                    )}
+                    Execute Task in File
+                  </button>
+                </form>
+
                 <div className="flex-1 overflow-auto font-mono text-xs bg-[#0d1117] p-4 rounded border border-[#30363d] text-[#e6edf3]">
                   {fileLoading ? (
                     <div className="flex items-center gap-2 text-[#8b949e]">
                       <Loader2 className="w-4 h-4 animate-spin" /> Loading file content...
                     </div>
                   ) : fileContent ? (
-                    <pre className="leading-relaxed whitespace-pre-wrap">{fileContent.content}</pre>
+                    <pre className="leading-relaxed whitespace-pre-wrap">
+                      {fileContent.content || '# Empty file — use the prompt bar above to generate code inside this file!'}
+                    </pre>
                   ) : (
                     <p className="text-[#8b949e]">Unable to preview file.</p>
                   )}

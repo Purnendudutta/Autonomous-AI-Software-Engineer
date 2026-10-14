@@ -25,11 +25,32 @@ const STATUS_BADGES: Record<TaskStatus, string> = {
   cancelled: 'badge-neutral',
 }
 
-const PROMPT_PRESETS = [
-  'Fix token expiration bug in authentication service',
-  'Add healthcheck endpoint with system diagnostics',
-  'Implement input validation and error handling for user routes',
-  'Refactor database query to optimize response times',
+const BEGINNER_TASK_CATEGORIES = [
+  {
+    category: '🔢 Math & Number Logic',
+    tasks: [
+      'Add a factorial(n) function to compute the factorial of a number',
+      'Add a fibonacci(n) function to return the n-th Fibonacci number',
+      'Add an is_prime(n) function to check whether a number is prime',
+      'Add a division function div(a, b) with zero-division check',
+    ],
+  },
+  {
+    category: '🔤 Strings & Lists / Arrays',
+    tasks: [
+      'Add an is_palindrome(text) function to check if a string is a palindrome',
+      'Add a reverse_string(text) function to reverse a string',
+      'Add a count_vowels(text) function to count vowels in a string',
+      'Add a find_max(items) function to find the largest number in a list',
+    ],
+  },
+  {
+    category: '📘 Docs, Comments & Tests',
+    tasks: [
+      'Update README.md with a beginner-friendly project overview and examples',
+      'Add unit tests to verify the calculator / utility functions',
+    ],
+  },
 ]
 
 export function Tasks() {
@@ -127,7 +148,7 @@ export function Tasks() {
       <div>
         <h1 className="text-2xl font-bold text-white">Engineering Tasks</h1>
         <p className="text-[#8b949e] text-xs mt-0.5">
-          Assign autonomous debugging, feature implementation, and refactoring tasks to the AI agent
+          Assign autonomous code generation, algorithm implementation, testing, and documentation tasks to the AI agent
         </p>
       </div>
 
@@ -146,7 +167,7 @@ export function Tasks() {
             before assigning tasks.
           </div>
         ) : (
-          <form onSubmit={handleCreateTask} className="space-y-3">
+          <form onSubmit={handleCreateTask} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-[#8b949e] mb-1">
                 Target Repository
@@ -166,32 +187,40 @@ export function Tasks() {
 
             <div>
               <label className="block text-xs font-semibold text-[#8b949e] mb-1">
-                Task Description & Instructions
+                Task Description & Specification
               </label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="E.g. Fix token expiration handling in auth service and add regression test..."
+                placeholder="E.g. Add a factorial(n) function in calculator.py and write unit tests for it..."
                 rows={3}
                 className="w-full bg-[#0d1117] border border-[#30363d] rounded-md px-3 py-2 text-xs text-white placeholder-[#6e7681] focus:outline-none focus:border-[#58a6ff]"
               />
             </div>
 
-            {/* Prompt presets */}
-            <div className="space-y-1.5">
-              <span className="text-[11px] text-[#8b949e] flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-yellow-400" /> Quick Task Templates:
+            {/* Quick Task Templates */}
+            <div className="space-y-2.5 bg-[#0d1117]/60 p-3.5 rounded-lg border border-[#30363d]">
+              <span className="text-xs font-semibold text-white flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-yellow-400" />
+                Quick Task Templates:
               </span>
-              <div className="flex flex-wrap gap-1.5">
-                {PROMPT_PRESETS.map((p, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => setDescription(p)}
-                    className="text-[10px] bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] px-2 py-1 rounded border border-[#30363d] transition-colors"
-                  >
-                    {p}
-                  </button>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {BEGINNER_TASK_CATEGORIES.map((group) => (
+                  <div key={group.category} className="space-y-1.5">
+                    <p className="text-[11px] font-semibold text-[#8b949e]">{group.category}</p>
+                    <div className="flex flex-col gap-1.5">
+                      {group.tasks.map((taskText, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setDescription(taskText)}
+                          className="text-left text-[11px] bg-[#161b22] hover:bg-[#21262d] hover:border-[#58a6ff] text-[#c9d1d9] hover:text-white px-2.5 py-1.5 rounded border border-[#30363d] transition-colors"
+                        >
+                          {taskText}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -202,7 +231,7 @@ export function Tasks() {
               </p>
             )}
 
-            <div className="pt-2">
+            <div className="pt-1">
               <button
                 type="submit"
                 disabled={submitting || !description.trim() || !selectedRepo}
