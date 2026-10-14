@@ -150,6 +150,3 @@ Autonomous-AI-Software-Engineer/
 ```
 
 ---
-
-## 📄 License
-MIT License. Built with ❤️ by the Autonomous AI Engineering Team.
